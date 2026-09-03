@@ -1,0 +1,78 @@
+name: Publish bd-cli release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: bd-cli version to republish (for example, 0.1.36)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      DOWNLOAD_BASE_URL: https://dl.bitdrift.io/bd-cli/${{ inputs.version }}
+    steps:
+      - name: Validate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Version must be a semantic version without a leading v: $VERSION" >&2
+            exit 1
+          }
+
+      - name: Download and verify release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+
+          artifacts=(
+            bd-cli-linux-arm64.tar.gz
+            bd-cli-linux-x86_64.tar.gz
+            bd-cli-mac-arm64.tar.gz
+            bd-cli-mac-universal-apple-darwin.tar.gz
+            bd-cli-mac-x86_64.tar.gz
+          )
+
+          for filename in "${artifacts[@]}"; do
+            url="$DOWNLOAD_BASE_URL/$filename"
+
+            curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
+              "$url" -o "release-assets/$filename"
+            curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
+              "$url.sha256" -o "release-assets/$filename.sha256"
+
+            expected_checksum="$(tr -d '[:space:]' < "release-assets/$filename.sha256")"
+            actual_checksum="$(sha256sum "release-assets/$filename" | cut -d ' ' -f 1)"
+            [[ "$expected_checksum" == "$actual_checksum" ]] || {
+              echo "Checksum verification failed for $filename" >&2
+              exit 1
+            }
+            printf '%s  %s\n' "$actual_checksum" "$filename" >> release-assets/checksums.txt
+            rm "release-assets/$filename.sha256"
+          done
+
+      - name: Create GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$tag" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "bd-cli $tag" \
+              --notes "Republished from dl.bitdrift.io."
+          fi
