@@ -35,16 +35,11 @@ jobs:
           set -euo pipefail
           mkdir release-assets
 
-          artifacts=(
-            bd-cli-linux-arm64.tar.gz
-            bd-cli-linux-x86_64.tar.gz
-            bd-cli-mac-arm64.tar.gz
-            bd-cli-mac-universal-apple-darwin.tar.gz
-            bd-cli-mac-x86_64.tar.gz
-          )
-
-          for filename in "${artifacts[@]}"; do
-            url="$DOWNLOAD_BASE_URL/$filename"
+          download_and_verify() {
+            local filename="$1"
+            local url="$2"
+            local expected_checksum
+            local actual_checksum
 
             curl --fail --location --retry 3 --retry-all-errors --silent --show-error \
               "$url" -o "release-assets/$filename"
@@ -59,6 +54,32 @@ jobs:
             }
             printf '%s  %s\n' "$actual_checksum" "$filename" >> release-assets/checksums.txt
             rm "release-assets/$filename.sha256"
+          }
+
+          archive_artifacts=(
+            bd-cli-linux-arm64.tar.gz
+            bd-cli-linux-x86_64.tar.gz
+            bd-cli-mac-arm64.tar.gz
+            bd-cli-mac-universal-apple-darwin.tar.gz
+            bd-cli-mac-x86_64.tar.gz
+          )
+
+          for filename in "${archive_artifacts[@]}"; do
+            download_and_verify "$filename" "$DOWNLOAD_BASE_URL/$filename"
+          done
+
+          raw_artifacts=(
+            bd-linux-arm64:bd-cli-linux-arm64.tar.gz
+            bd-linux-x86_64:bd-cli-linux-x86_64.tar.gz
+            bd-macos-arm64:bd-cli-mac-arm64.tar.gz
+            bd-macos-universal:bd-cli-mac-universal-apple-darwin.tar.gz
+            bd-macos-x86_64:bd-cli-mac-x86_64.tar.gz
+          )
+
+          for artifact in "${raw_artifacts[@]}"; do
+            filename="${artifact%%:*}"
+            archive_filename="${artifact#*:}"
+            download_and_verify "$filename" "$DOWNLOAD_BASE_URL/$archive_filename/bd"
           done
 
       - name: Create GitHub release
